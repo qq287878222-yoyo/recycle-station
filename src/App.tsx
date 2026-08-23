@@ -9,11 +9,13 @@ import MyOrders from './pages/customer/MyOrders';
 import TeamOrders from './pages/customer/TeamOrders';
 import Income from './pages/customer/Income';
 import Invite from './pages/customer/Invite';
+import Profile from './pages/customer/Profile';
 import AdminItems from './pages/admin/Items';
 import AdminCategories from './pages/admin/Categories';
 import AdminOrders from './pages/admin/Orders';
 import AdminAgents from './pages/admin/Agents';
 import AdminStats from './pages/admin/Stats';
+import AdminWarehouse from './pages/admin/Warehouse';
 import RequireAuth from './components/RequireAuth';
 
 function App() {
@@ -38,6 +40,7 @@ function App() {
           <Route path="team-orders" element={<TeamOrders />} />
           <Route path="income" element={<Income />} />
           <Route path="invite" element={<Invite />} />
+          <Route path="profile" element={<Profile />} />
         </Route>
 
         <Route
@@ -54,6 +57,7 @@ function App() {
           <Route path="orders" element={<AdminOrders />} />
           <Route path="agents" element={<AdminAgents />} />
           <Route path="stats" element={<AdminStats />} />
+          <Route path="warehouse" element={<AdminWarehouse />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

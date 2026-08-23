@@ -9,6 +9,9 @@ export interface AppUser {
   username: string;
   password_hash: string;
   phone: string | null;
+  wechat: string | null;
+  wechat_qrcode: string | null;
+  alipay_qrcode: string | null;
   role: UserRole;
   agent_level: AgentLevel;
   parent_id: string | null;
@@ -62,6 +65,7 @@ export function priceForUser(
 
 // ================== 订单 ==================
 export type OrderStatus = 'pending' | 'received' | 'sold';
+export type SplitStatus = 'unsplit' | 'split';
 
 export interface Order {
   id: string;
@@ -79,6 +83,9 @@ export interface Order {
   sold_at: string | null;
   remark: string | null;
   created_at: string;
+  split_status: SplitStatus;
+  split_at: string | null;
+  settled_at: string | null;
 }
 
 export interface OrderItem {

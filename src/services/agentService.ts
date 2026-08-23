@@ -22,7 +22,7 @@ export const agentService = {
       .from('app_users')
       .insert({
         username: params.username,
-        password_hash: hashPassword(params.password),
+        password_hash: await hashPassword(params.password),
         phone: params.phone ?? null,
         role: 'agent',
         agent_level: 1,

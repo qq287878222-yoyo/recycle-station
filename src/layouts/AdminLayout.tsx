@@ -1,5 +1,5 @@
 import { Layout, Menu, Button, Space } from 'antd';
-import { DatabaseOutlined, FileTextOutlined, BarChartOutlined, LogoutOutlined, TagsOutlined, TeamOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, FileTextOutlined, BarChartOutlined, LogoutOutlined, TagsOutlined, TeamOutlined, InboxOutlined } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '../services/authService';
 
@@ -21,7 +21,7 @@ export default function AdminLayout() {
     <Layout style={{ minHeight: '100vh' }}>
       <Sider theme="light" width={220} style={{ boxShadow: '2px 0 6px rgba(0,0,0,0.04)' }}>
         <div style={{ padding: '20px 24px', fontSize: 18, fontWeight: 700, color: '#52c41a' }}>
-          ♻️ 回收站管理端
+          ♻️ 101代购中心管理端
         </div>
         <Menu
           mode="inline"
@@ -29,6 +29,7 @@ export default function AdminLayout() {
           onClick={(e) => navigate(`/admin/${e.key}`)}
           items={[
             { key: 'orders', icon: <FileTextOutlined />, label: '订单管理' },
+            { key: 'warehouse', icon: <InboxOutlined />, label: '仓库库存' },
             { key: 'items', icon: <DatabaseOutlined />, label: '物品目录' },
             { key: 'categories', icon: <TagsOutlined />, label: '分类管理' },
             { key: 'agents', icon: <TeamOutlined />, label: '代理管理' },

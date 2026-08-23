@@ -32,7 +32,7 @@ export default function Login() {
       <Card style={{ width: 400, boxShadow: '0 10px 40px rgba(0,0,0,0.15)' }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{ fontSize: 48 }}>♻️</div>
-          <Typography.Title level={3} style={{ margin: 0 }}>回收站</Typography.Title>
+          <Typography.Title level={3} style={{ margin: 0 }}>101代购中心</Typography.Title>
         </div>
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>

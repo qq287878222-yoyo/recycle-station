@@ -1,10 +1,24 @@
 import { getPostgrest } from '../utils/supabase';
+import bcrypt from 'bcryptjs';
 import type { AppUser, AgentLevel } from '../types/database';
 
 const CURRENT_USER_KEY = 'current_user';
 
-// 简易的密码哈希 (仅演示,生产应使用 bcrypt/argon2)
-export const hashPassword = (password: string): string => password;
+// bcrypt 哈希前缀,用于识别新格式密码(历史数据曾明文存储)
+const BCRYPT_PREFIXES = ['$2a$', '$2b$', '$2y$'];
+export const isBcryptHash = (hash: string): boolean =>
+  BCRYPT_PREFIXES.some((p) => hash.startsWith(p));
+
+// 密码使用 bcrypt 加盐哈希存储(兼容浏览器端,内置自动加盐)
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+// 校验密码:新格式走 bcrypt 比对,存量明文数据做兼容校验(登录后自动升级)
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (isBcryptHash(storedHash)) return bcrypt.compare(password, storedHash);
+  return storedHash === password;
+}
 
 /**
  * 根据邀请人级别推导新用户级别
@@ -62,7 +76,7 @@ export const authService = {
       .from('app_users')
       .insert({
         username,
-        password_hash: hashPassword(password),
+        password_hash: await hashPassword(password),
         phone,
         role,
         agent_level,
@@ -83,8 +97,16 @@ export const authService = {
       .maybeSingle();
     if (error) throw error;
     if (!data) throw new Error('用户不存在');
-    if (data.password_hash !== hashPassword(password)) throw new Error('密码错误');
     const user = data as AppUser;
+    if (!(await verifyPassword(password, user.password_hash))) throw new Error('密码错误');
+    // 存量明文密码:验证通过后静默升级为 bcrypt 哈希
+    if (!isBcryptHash(user.password_hash)) {
+      try {
+        const upgraded = await hashPassword(password);
+        await supabase.from('app_users').update({ password_hash: upgraded }).eq('id', user.id);
+        user.password_hash = upgraded;
+      } catch { /* 升级失败不阻断登录 */ }
+    }
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
     return user;
   },
@@ -101,6 +123,30 @@ export const authService = {
     } catch {
       return null;
     }
+  },
+
+  /**
+   * 更新当前用户资料(电话/微信号/收款码),同步刷新本地登录态缓存
+   */
+  async updateProfile(
+    userId: string,
+    updates: Pick<AppUser, 'phone' | 'wechat' | 'wechat_qrcode' | 'alipay_qrcode'>
+  ): Promise<AppUser> {
+    const supabase = await getPostgrest();
+    const { data, error } = await supabase
+      .from('app_users')
+      .update(updates)
+      .eq('id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    const user = data as AppUser;
+    // 若更新的是当前登录用户,同步本地缓存,保证页面立即生效
+    const current = authService.getCurrentUser();
+    if (current?.id === user.id) {
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+    }
+    return user;
   },
 };
 

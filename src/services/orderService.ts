@@ -133,6 +133,53 @@ export const orderService = {
     if (error) throw error;
     return data as Order;
   },
+
+  /**
+   * 确认分账:标记该订单已把上级代理差价分出
+   */
+  async markSplit(orderId: string): Promise<Order> {
+    const supabase = await getPostgrest();
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ split_status: 'split', split_at: new Date().toISOString() })
+      .eq('id', orderId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Order;
+  },
+
+  /**
+   * 仓库库存来源订单:已确认(received/sold)且尚未结算的订单,
+   * 确认收货后自动累计进库存,结算清除后不再计入
+   */
+  async listStockOrders(): Promise<OrderWithLines[]> {
+    const supabase = await getPostgrest();
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, order_items(*)')
+      .in('status', ['received', 'sold'])
+      .is('settled_at', null)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as OrderWithLines[];
+  },
+
+  /**
+   * 一键清除库存:把当前所有在库订单标记为已结算,
+   * 之后新确认的订单重新累计
+   */
+  async settleWarehouse(): Promise<number> {
+    const supabase = await getPostgrest();
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ settled_at: new Date().toISOString() })
+      .in('status', ['received', 'sold'])
+      .is('settled_at', null)
+      .select('id');
+    if (error) throw error;
+    return data?.length ?? 0;
+  },
 };
 
 /**
@@ -184,4 +231,30 @@ export function computeAdminProfit(order: OrderWithLines): number {
     return sum + inPrice * qty;
   }, 0);
   return Number(order.sold_amount) - cost;
+}
+
+export interface SplitShare {
+  level: 1 | 2 | 3;
+  agent_id: string;
+  amount: number;
+}
+
+/**
+ * 计算订单需要分给各级上线代理的金额(差价分账):
+ * - L3:Σ (price_l3 - 下单价) × qty
+ * - L2:Σ (price_l2 - (有L3则 price_l3 否则下单价)) × qty
+ * - L1:Σ (price_l1 - (有L2则 price_l2,有L3则 price_l3,否则下单价)) × qty
+ */
+export function computeSplitShares(order: OrderWithLines): SplitShare[] {
+  const shares: SplitShare[] = [];
+  if (order.l3_agent_id) {
+    shares.push({ level: 3, agent_id: order.l3_agent_id, amount: computeIncome(order, order.l3_agent_id) });
+  }
+  if (order.l2_agent_id) {
+    shares.push({ level: 2, agent_id: order.l2_agent_id, amount: computeIncome(order, order.l2_agent_id) });
+  }
+  if (order.l1_agent_id) {
+    shares.push({ level: 1, agent_id: order.l1_agent_id, amount: computeIncome(order, order.l1_agent_id) });
+  }
+  return shares;
 }

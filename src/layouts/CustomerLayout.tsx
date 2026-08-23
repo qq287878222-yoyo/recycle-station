@@ -1,4 +1,4 @@
-import { Layout, Menu, Button, Space, Tag } from 'antd';
+import { Layout, Menu, Button, Space, Tag, App } from 'antd';
 import {
   AppstoreOutlined,
   ShoppingCartOutlined,
@@ -7,8 +7,9 @@ import {
   TeamOutlined,
   DollarOutlined,
   GiftOutlined,
+  IdcardOutlined,
 } from '@ant-design/icons';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { authService } from '../services/authService';
 
 const { Header, Content } = Layout;
@@ -22,6 +23,7 @@ const LEVEL_TAG: Record<number, { text: string; color: string }> = {
 export default function CustomerLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { message } = App.useApp();
   const user = authService.getCurrentUser();
 
   const activeKey = location.pathname.split('/')[1] || 'catalog';
@@ -30,6 +32,16 @@ export default function CustomerLayout() {
   const handleLogout = () => {
     authService.logout();
     navigate('/login');
+  };
+
+  const handleMenuClick = (e: { key: string }) => {
+    // 点击时二次校验登录态:若会话已失效,提示并跳转登录页,避免进入子页后白屏/闪跳
+    if (!authService.getCurrentUser()) {
+      message.warning('登录已过期,请重新登录');
+      navigate('/login');
+      return;
+    }
+    navigate(`/${e.key === 'catalog' ? 'catalog' : e.key}`);
   };
 
   const menuItems = [
@@ -43,21 +55,27 @@ export default function CustomerLayout() {
           { key: 'invite', icon: <GiftOutlined />, label: '我的邀请码' },
         ]
       : []),
+    { key: 'profile', icon: <IdcardOutlined />, label: '个人资料' },
   ];
 
   const levelTag = user?.role === 'agent' && user.agent_level ? LEVEL_TAG[user.agent_level] : null;
+
+  // 登录态丢失时的兜底保护:声明式跳转,不渲染菜单避免误导
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{ display: 'flex', alignItems: 'center', background: '#fff', boxShadow: '0 2px 8px #f0f1f2' }}>
         <div style={{ fontSize: 20, fontWeight: 700, color: '#52c41a', marginRight: 40 }}>
-          ♻️ 回收站
+          ♻️ 101代购中心
         </div>
         <Menu
           mode="horizontal"
           selectedKeys={[activeKey]}
           style={{ flex: 1, borderBottom: 'none' }}
-          onClick={(e) => navigate(`/${e.key === 'catalog' ? 'catalog' : e.key}`)}
+          onClick={handleMenuClick}
           items={menuItems}
         />
         <Space>

@@ -66,5 +66,5 @@ Vercel 控制台 → 项目 → Settings → Domains → Add,按引导配置 DNS
 
 1. **anon key 可以暴露给前端**——它是公钥,配合 Supabase 的 RLS(行级安全)保证数据安全
 2. 当前 SQL 脚本的 RLS 策略是「允许所有操作」,只适合演示。**生产环境**必须改成基于 `auth.uid()` 的严格策略,并把认证改用 Supabase Auth
-3. 密码目前是明文存储(为演示简化)。生产上必须换成 Supabase Auth 或至少 bcrypt 哈希
+3. 密码使用 bcrypt 加盐哈希存储（客户端哈希后写入），存量明文密码会在用户下次登录时自动升级。生产上建议改用 Supabase Auth
 4. Supabase 免费计划:500 MB 数据库、2 GB 出站流量、50 K 月活用户,小规模够用

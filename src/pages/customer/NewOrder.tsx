@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Table, InputNumber, Button, Typography, App, Statistic, Row, Col, Input, Space, Tag, Empty } from 'antd';
+import { Card, Table, InputNumber, Button, Typography, App, Statistic, Row, Col, Input, Space, Tag, Empty, Select } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { SendOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { itemService } from '../../services/itemService';
 import { orderService } from '../../services/orderService';
 import { authService } from '../../services/authService';
-import { priceForUser, type RecycleItem } from '../../types/database';
+import { categoryService } from '../../services/categoryService';
+import { priceForUser, type RecycleItem, type Category } from '../../types/database';
 
 interface CartLine {
   item: RecycleItem;
@@ -18,6 +19,8 @@ export default function NewOrder() {
   const { message } = App.useApp();
   const user = authService.getCurrentUser();
   const [items, setItems] = useState<RecycleItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [remark, setRemark] = useState('');
   const [loading, setLoading] = useState(true);
@@ -32,7 +35,17 @@ export default function NewOrder() {
         setLoading(false);
       }
     })();
+    (async () => {
+      try {
+        setCategories(await categoryService.list());
+      } catch { /* 分类加载失败不阻断下单 */ }
+    })();
   }, []);
+
+  const filteredItems = useMemo(
+    () => (categoryFilter === 'all' ? items : items.filter((it) => it.category_id === categoryFilter)),
+    [items, categoryFilter]
+  );
 
   const lines: CartLine[] = useMemo(
     () =>
@@ -137,12 +150,26 @@ export default function NewOrder() {
 
       <Row gutter={16}>
         <Col span={16}>
-          <Card title="按模板填写回收货品" size="small">
+          <Card
+            title="按模板填写回收货品"
+            size="small"
+            extra={
+              <Select
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+                style={{ width: 160 }}
+                options={[
+                  { value: 'all', label: '全部分类' },
+                  ...categories.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+              />
+            }
+          >
             <Table
               rowKey="id"
               loading={loading}
               columns={itemColumns}
-              dataSource={items}
+              dataSource={filteredItems}
               pagination={false}
               size="small"
               scroll={{ y: 460 }}
