@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Tag, Typography, Space, Button, Modal, Form, InputNumber, Input, App, Descriptions, Statistic, Row, Col, Select, DatePicker, Divider, Tooltip, Image } from 'antd';
+import { Card, Table, Tag, Typography, Space, Button, Modal, Form, InputNumber, Input, App, Descriptions, Statistic, Row, Col, Select, DatePicker, Divider, Tooltip, Image, Popconfirm, Radio } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CheckCircleOutlined, DollarOutlined, SearchOutlined, InboxOutlined, PlusOutlined, PayCircleOutlined, UserOutlined, PhoneOutlined, WechatOutlined, AlipayOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, DollarOutlined, SearchOutlined, InboxOutlined, PlusOutlined, PayCircleOutlined, UserOutlined, PhoneOutlined, WechatOutlined, DeleteOutlined, CarOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import { orderService, computeAdminProfit, computeSplitShares, type OrderWithLines } from '../../services/orderService';
 import { agentService } from '../../services/agentService';
 import { itemService } from '../../services/itemService';
-import type { AppUser, RecycleItem } from '../../types/database';
+import type { AppUser, RecycleItem, DeliveryMethod } from '../../types/database';
+import { priceForUser } from '../../types/database';
 
 const { RangePicker } = DatePicker;
 
@@ -42,13 +43,29 @@ export default function AdminOrders() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [keyword, setKeyword] = useState('');
   const [customerKeyword, setCustomerKeyword] = useState('');
+  const [trackingKeyword, setTrackingKeyword] = useState('');
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('time_desc');
   const [soldModal, setSoldModal] = useState<{ open: boolean; order: OrderWithLines | null }>({ open: false, order: null });
   const [splitModal, setSplitModal] = useState<{ open: boolean; order: OrderWithLines | null }>({ open: false, order: null });
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [form] = Form.useForm<{ sold_amount: number; sold_buyer?: string }>();
-  const [addForm] = Form.useForm<{ user_id: string; lines: { item_id: string; quantity: number }[]; remark?: string }>();
+  const [addForm] = Form.useForm<{ user_id: string; lines: { item_id: string; quantity: number }[]; remark?: string; delivery_method: DeliveryMethod; tracking_number?: string }>();
+  const addDelivery = Form.useWatch('delivery_method', addForm);
+  const addUserId = Form.useWatch('user_id', addForm);
+  const addLines = Form.useWatch('lines', addForm);
+
+  /** 手工单按所选下单人级别取价 */
+  const addOrderUser = users.find((u) => u.id === addUserId) ?? null;
+  const addLinePrice = (itemId?: string) => {
+    if (!addOrderUser) return null;
+    const it = items.find((i) => i.id === itemId);
+    return it ? priceForUser(it, addOrderUser) : null;
+  };
+  const addTotal = (addLines ?? []).reduce((sum, l) => {
+    const p = addLinePrice(l?.item_id);
+    return p == null || !l?.quantity ? sum : sum + p * l.quantity;
+  }, 0);
 
   const load = async () => {
     setLoading(true);
@@ -66,6 +83,21 @@ export default function AdminOrders() {
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const userName = (id: string | null) => (id ? userMap.get(id)?.username ?? '未知用户' : '—');
 
+  /** 用户联系/收款信息展示(展开详情结算明细中复用) */
+  const contactInfo = (u: AppUser | undefined) => {
+    if (!u || (!u.phone && !u.wechat && !u.wechat_qrcode && !u.alipay_qrcode)) {
+      return <span style={{ color: '#999' }}>未填写</span>;
+    }
+    return (
+      <Space size={12} wrap align="start">
+        {u.phone && <span><PhoneOutlined /> {u.phone}</span>}
+        {u.wechat && <span><WechatOutlined /> {u.wechat}</span>}
+        {u.wechat_qrcode && <Image src={u.wechat_qrcode} width={40} height={40} style={{ objectFit: 'contain' }} />}
+        {u.alipay_qrcode && <Image src={u.alipay_qrcode} width={40} height={40} style={{ objectFit: 'contain' }} />}
+      </Space>
+    );
+  };
+
   /** 订单的直接上家代理 id:L2→L1、L3→L2、客户→L3、L1→管理员 */
   const directParent = (o: OrderWithLines): { name: string; level: string } => {
     if (o.user_level === 1) return { name: '管理员', level: 'admin' };
@@ -79,6 +111,7 @@ export default function AdminOrders() {
       if (statusFilter !== 'all' && o.status !== statusFilter) return false;
       if (keyword && !o.id.toLowerCase().includes(keyword.toLowerCase())) return false;
       if (customerKeyword && !o.username.toLowerCase().includes(customerKeyword.toLowerCase())) return false;
+      if (trackingKeyword && !(o.tracking_number ?? '').toLowerCase().includes(trackingKeyword.toLowerCase())) return false;
       if (dateRange) {
         const d = dayjs(o.created_at);
         if (d.isBefore(dateRange[0].startOf('day')) || d.isAfter(dateRange[1].endOf('day'))) return false;
@@ -92,7 +125,7 @@ export default function AdminOrders() {
       default: list = [...list].sort((a, b) => dayjs(b.created_at).valueOf() - dayjs(a.created_at).valueOf());
     }
     return list;
-  }, [orders, statusFilter, keyword, customerKeyword, dateRange, sortKey]);
+  }, [orders, statusFilter, keyword, customerKeyword, trackingKeyword, dateRange, sortKey]);
 
   const stats = useMemo(() => {
     const pending = filtered.filter((o) => o.status === 'pending').length;
@@ -104,14 +137,13 @@ export default function AdminOrders() {
   }, [filtered]);
 
   const openSoldModal = (order: OrderWithLines) => {
+    // 默认预填一级代理价合计,管理员可手动修改为实际成交价
     const items = order.order_items ?? [];
-    const cost = items.reduce((sum, li) => {
-      const l1 = Number(li.price_l1_snapshot ?? 0);
-      const unit = Number(li.unit_price);
-      const inPrice = order.user_level === 1 ? unit : l1;
-      return sum + inPrice * Number(li.quantity);
-    }, 0);
-    form.setFieldsValue({ sold_amount: Number((cost * 1.5).toFixed(2)) });
+    const l1Total = items.reduce(
+      (sum, li) => sum + Number(li.price_l1_snapshot ?? 0) * Number(li.quantity),
+      0
+    );
+    form.setFieldsValue({ sold_amount: Number(l1Total.toFixed(2)) });
     setSoldModal({ open: true, order });
   };
 
@@ -144,6 +176,14 @@ export default function AdminOrders() {
     } catch (e) { message.error((e as Error).message); }
   };
 
+  const handleDelete = async (order: OrderWithLines) => {
+    try {
+      await orderService.removeOrder(order.id);
+      message.success('订单已删除');
+      load();
+    } catch (e) { message.error((e as Error).message); }
+  };
+
   const handleAddOrder = async () => {
     const values = await addForm.validateFields();
     const user = users.find((u) => u.id === values.user_id);
@@ -153,7 +193,14 @@ export default function AdminOrders() {
       .filter((l) => l.item && l.quantity > 0) as { item: RecycleItem; quantity: number }[];
     if (!lines.length) { message.warning('请至少添加一项货品'); return; }
     try {
-      const order = await orderService.createOrder({ user, lines, remark: values.remark });
+      const order = await orderService.createOrder({
+        user,
+        lines,
+        remark: values.remark,
+        isManual: true,
+        deliveryMethod: values.delivery_method ?? 'door',
+        trackingNumber: values.tracking_number?.trim(),
+      });
       message.success(`手工订单创建成功,总金额 ¥${order.total_amount}`);
       setAddModalOpen(false);
       addForm.resetFields();
@@ -162,7 +209,15 @@ export default function AdminOrders() {
   };
 
   const columns: ColumnsType<OrderWithLines> = [
-    { title: '订单号', dataIndex: 'id', width: 100, render: (v: string) => <code style={{ fontSize: 12 }}>{v.slice(0, 8)}</code> },
+    {
+      title: '订单号', dataIndex: 'id', width: 130,
+      render: (v: string, r) => (
+        <Space size={4}>
+          <code style={{ fontSize: 12 }}>{v.slice(0, 8)}</code>
+          {r.is_manual && <Tag color="purple" style={{ marginRight: 0 }}>手工</Tag>}
+        </Space>
+      ),
+    },
     { title: '下单人', dataIndex: 'username', width: 100 },
     { title: '级别', dataIndex: 'user_level', width: 90, render: (lv: number | null) => <Tag>{LEVEL_LABEL[String(lv)]}</Tag> },
     {
@@ -211,7 +266,7 @@ export default function AdminOrders() {
     },
     { title: '状态', dataIndex: 'status', width: 120, render: (s: string) => { const st = STATUS_MAP[s] ?? { text: s, color: 'default' }; return <Tag color={st.color}>{st.text}</Tag>; } },
     {
-      title: '操作', key: 'action', width: 230, fixed: 'right',
+      title: '操作', key: 'action', width: 300, fixed: 'right',
       render: (_, r) => (
         <Space size={4}>
           {r.status === 'pending' && (
@@ -230,12 +285,104 @@ export default function AdminOrders() {
               <Button size="small" icon={<PayCircleOutlined />} onClick={() => setSplitModal({ open: true, order: r })}>分账</Button>
             )
           )}
+          <Popconfirm
+            title="删除订单"
+            description="删除后不可恢复,货品明细会一并删除,确认删除?"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={() => handleDelete(r)}
+          >
+            <Button danger size="small" icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
         </Space>
       ),
     },
   ];
 
   const splitShares = splitModal.order ? computeSplitShares(splitModal.order) : [];
+
+  /** 展开详情的结算明细行:下单人应得订单金额,各级上线代理应得差价分账 */
+  interface SettlementRow {
+    key: string;
+    userId: string;
+    roleLabel: string;
+    tagColor: string;
+    amount: number;
+  }
+  const settlementRows = (record: OrderWithLines): SettlementRow[] => {
+    const rows: SettlementRow[] = [
+      {
+        key: 'customer',
+        userId: record.user_id,
+        roleLabel: `下单人(${LEVEL_LABEL[String(record.user_level)]})`,
+        tagColor: LEVEL_TAG_COLOR[String(record.user_level)],
+        amount: Number(record.total_amount),
+      },
+    ];
+    for (const sh of computeSplitShares(record)) {
+      rows.push({
+        key: `agent-${sh.level}`,
+        userId: sh.agent_id,
+        roleLabel: `上家代理(差价分账)`,
+        tagColor: LEVEL_TAG_COLOR[String(sh.level)],
+        amount: sh.amount,
+      });
+    }
+    return rows;
+  };
+  const settlementTableColumns: ColumnsType<SettlementRow> = [
+    {
+      title: '结算对象', key: 'who', width: 200,
+      render: (_, r) => (
+        <Space size={6}>
+          <Tag color={r.tagColor} style={{ marginRight: 0 }}>{LEVEL_LABEL[String(userMap.get(r.userId)?.agent_level)]}</Tag>
+          <span>{userName(r.userId)}</span>
+        </Space>
+      ),
+    },
+    { title: '角色', dataIndex: 'roleLabel', width: 160 },
+    {
+      title: '电话/微信', key: 'contact',
+      render: (_, r) => {
+        const u = userMap.get(r.userId);
+        if (!u || (!u.phone && !u.wechat)) return <span style={{ color: '#999' }}>未填写</span>;
+        return (
+          <Space size={12}>
+            {u.phone && <span><PhoneOutlined /> {u.phone}</span>}
+            {u.wechat && <span><WechatOutlined /> {u.wechat}</span>}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '收款码(点击放大)', key: 'qrcode', width: 130,
+      render: (_, r) => {
+        const u = userMap.get(r.userId);
+        if (!u || (!u.wechat_qrcode && !u.alipay_qrcode)) return <span style={{ color: '#999' }}>未上传</span>;
+        return (
+          <Space size={8}>
+            {u.wechat_qrcode && (
+              <Tooltip title="微信收款码">
+                <Image src={u.wechat_qrcode} width={40} height={40} style={{ objectFit: 'contain' }} />
+              </Tooltip>
+            )}
+            {u.alipay_qrcode && (
+              <Tooltip title="支付宝收款码">
+                <Image src={u.alipay_qrcode} width={40} height={40} style={{ objectFit: 'contain' }} />
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '结算金额', dataIndex: 'amount', width: 120,
+      render: (v: number, r) => (
+        <b style={{ color: r.key === 'customer' ? '#1890ff' : '#fa8c16' }}>¥{v.toFixed(2)}</b>
+      ),
+    },
+  ];
 
   return (
     <div>
@@ -257,6 +404,7 @@ export default function AdminOrders() {
         <Space wrap style={{ marginBottom: 12 }}>
           <Input prefix={<UserOutlined />} placeholder="搜索客户/下单人" value={customerKeyword} onChange={(e) => setCustomerKeyword(e.target.value)} style={{ width: 180 }} allowClear />
           <Input prefix={<SearchOutlined />} placeholder="订单号" value={keyword} onChange={(e) => setKeyword(e.target.value)} style={{ width: 160 }} allowClear />
+          <Input prefix={<CarOutlined />} placeholder="快递单号" value={trackingKeyword} onChange={(e) => setTrackingKeyword(e.target.value)} style={{ width: 180 }} allowClear />
           <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 130 }}
             options={[
               { value: 'all', label: '全部状态' },
@@ -279,36 +427,19 @@ export default function AdminOrders() {
         </Space>
 
         <Table
-          rowKey="id" loading={loading} columns={columns} dataSource={filtered} scroll={{ x: 1600 }}
+          rowKey="id" loading={loading} columns={columns} dataSource={filtered} scroll={{ x: 1700 }}
           expandable={{
             expandedRowRender: (record) => (
               <Descriptions bordered size="small" column={2} labelStyle={{ width: 100 }}>
                 <Descriptions.Item label="备注" span={2}>{record.remark || '无'}</Descriptions.Item>
-                <Descriptions.Item label="联系方式" span={2}>
-                  {(() => {
-                    const u = userMap.get(record.user_id);
-                    if (!u || (!u.phone && !u.wechat && !u.wechat_qrcode && !u.alipay_qrcode)) {
-                      return <span style={{ color: '#999' }}>下单人未填写联系/收款信息</span>;
-                    }
-                    return (
-                      <Space size={20} wrap align="start">
-                        {u.phone && <span><PhoneOutlined /> {u.phone}</span>}
-                        {u.wechat && <span><WechatOutlined /> 微信:{u.wechat}</span>}
-                        {u.wechat_qrcode && (
-                          <div style={{ textAlign: 'center' }}>
-                            <Image src={u.wechat_qrcode} width={64} height={64} style={{ objectFit: 'contain' }} />
-                            <div style={{ fontSize: 12, color: '#999' }}><WechatOutlined /> 微信收款码</div>
-                          </div>
-                        )}
-                        {u.alipay_qrcode && (
-                          <div style={{ textAlign: 'center' }}>
-                            <Image src={u.alipay_qrcode} width={64} height={64} style={{ objectFit: 'contain' }} />
-                            <div style={{ fontSize: 12, color: '#999' }}><AlipayOutlined /> 支付宝收款码</div>
-                          </div>
-                        )}
-                      </Space>
-                    );
-                  })()}
+                <Descriptions.Item label="配送方式">
+                  {record.delivery_method === 'express'
+                    ? <Tag color="orange" icon={<CarOutlined />}>快递寄送</Tag>
+                    : <Tag color="green">送货上门</Tag>}
+                </Descriptions.Item>
+                <Descriptions.Item label="快递单号">{record.tracking_number || '—'}</Descriptions.Item>
+                <Descriptions.Item label="下单人收款" span={2}>
+                  {contactInfo(userMap.get(record.user_id))}
                 </Descriptions.Item>
                 <Descriptions.Item label="收货时间">{record.received_at ? dayjs(record.received_at).format('YYYY-MM-DD HH:mm') : '—'}</Descriptions.Item>
                 <Descriptions.Item label="售出时间">{record.sold_at ? dayjs(record.sold_at).format('YYYY-MM-DD HH:mm') : '—'}</Descriptions.Item>
@@ -322,6 +453,21 @@ export default function AdminOrders() {
                       { title: '数量', render: (_, r) => `${r.quantity} ${r.unit ?? ''}` },
                       { title: '小计', dataIndex: 'subtotal', render: (v) => `¥${Number(v).toFixed(2)}` },
                     ]}
+                  />
+                </Descriptions.Item>
+                <Descriptions.Item label="结算明细" span={2}>
+                  <Table<SettlementRow>
+                    size="small" pagination={false} rowKey="key"
+                    dataSource={settlementRows(record)}
+                    columns={settlementTableColumns}
+                    summary={(rows) => (
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={4}><b>本单结算合计</b></Table.Summary.Cell>
+                        <Table.Summary.Cell index={4}>
+                          <b style={{ color: '#f5222d' }}>¥{rows.reduce((s, r) => s + r.amount, 0).toFixed(2)}</b>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    )}
                   />
                 </Descriptions.Item>
               </Descriptions>
@@ -344,9 +490,35 @@ export default function AdminOrders() {
               <Descriptions.Item label="下单人">{soldModal.order.username}</Descriptions.Item>
               <Descriptions.Item label="订单金额">¥{Number(soldModal.order.total_amount).toFixed(2)}</Descriptions.Item>
             </Descriptions>
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="id"
+              dataSource={soldModal.order.order_items ?? []}
+              style={{ marginBottom: 16 }}
+              columns={[
+                { title: '货品', dataIndex: 'item_name' },
+                { title: '数量', width: 90, render: (_, r) => `${r.quantity} ${r.unit ?? ''}` },
+                { title: '一级价', dataIndex: 'price_l1_snapshot', width: 90, render: (v) => `¥${Number(v ?? 0).toFixed(2)}` },
+                { title: '小计', width: 100, render: (_, r) => <b>¥{(Number(r.price_l1_snapshot ?? 0) * Number(r.quantity)).toFixed(2)}</b> },
+              ]}
+              summary={(rows) => (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={3}><b>一级代理价合计</b></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3}>
+                    <b style={{ color: '#f5222d' }}>¥{rows.reduce((s, r) => s + Number(r.price_l1_snapshot ?? 0) * Number(r.quantity), 0).toFixed(2)}</b>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              )}
+            />
             <Form form={form} layout="vertical">
-              <Form.Item label="实际售出金额" name="sold_amount" rules={[{ required: true, message: '请输入售出金额' }]} extra="卖给外部买家的价格,系统据此计算利润">
-                <InputNumber min={0} precision={2} addonBefore="¥" style={{ width: '100%' }} size="large" />
+              <Form.Item label="实际售出金额" extra="默认为一级代理价合计,可修改为卖给外部买家的实际价格,系统据此计算利润">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Button size="large" disabled>¥</Button>
+                  <Form.Item name="sold_amount" noStyle rules={[{ required: true, message: '请输入售出金额' }]}>
+                    <InputNumber min={0} precision={2} size="large" style={{ width: '100%' }} />
+                  </Form.Item>
+                </Space.Compact>
               </Form.Item>
               <Form.Item label="买家/备注" name="sold_buyer">
                 <Input placeholder="可填买家名称或备注" />
@@ -400,7 +572,7 @@ export default function AdminOrders() {
         okText="创建订单"
         width={640}
       >
-        <Form form={addForm} layout="vertical" initialValues={{ lines: [{ quantity: 1 }] }}>
+        <Form form={addForm} layout="vertical" initialValues={{ lines: [{ quantity: 1 }], delivery_method: 'door' }}>
           <Form.Item
             label="下单人(按该用户级别计价并自动绑定其上线代理链)"
             name="user_id"
@@ -423,37 +595,71 @@ export default function AdminOrders() {
           <Form.List name="lines">
             {(fields, { add, remove }) => (
               <>
-                {fields.map((field) => (
-                  <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 4 }}>
-                    <Form.Item
-                      {...field} name={[field.name, 'item_id']} noStyle
-                      rules={[{ required: true, message: '请选择货品' }]}
-                    >
-                      <Select
-                        showSearch
-                        placeholder="选择货品"
-                        style={{ width: 280 }}
-                        optionFilterProp="label"
-                        options={items.map((it) => ({ value: it.id, label: `${it.name}(¥${it.price_customer}~${it.price_l1}/${it.unit})` }))}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      {...field} name={[field.name, 'quantity']} noStyle
-                      rules={[{ required: true, message: '请输入数量' }]}
-                    >
-                      <InputNumber min={0.01} precision={2} placeholder="数量" style={{ width: 120 }} />
-                    </Form.Item>
-                    {fields.length > 1 && (
-                      <Button type="text" danger size="small" onClick={() => remove(field.name)}>删除</Button>
-                    )}
-                  </Space>
-                ))}
+                {fields.map(({ key, name, ...restField }) => {
+                  const itemId = addLines?.[name]?.item_id;
+                  const linePrice = addLinePrice(itemId);
+                  const lineItem = items.find((it) => it.id === itemId);
+                  const qty = addLines?.[name]?.quantity;
+                  return (
+                    <Space key={key} align="baseline" style={{ display: 'flex', marginBottom: 4 }}>
+                      <Form.Item
+                        {...restField} name={[name, 'item_id']} noStyle
+                        rules={[{ required: true, message: '请选择货品' }]}
+                      >
+                        <Select
+                          showSearch
+                          placeholder="选择货品"
+                          style={{ width: 240 }}
+                          optionFilterProp="label"
+                          options={items.map((it) => ({ value: it.id, label: `${it.name}(¥${it.price_customer}~${it.price_l1}/${it.unit})` }))}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        {...restField} name={[name, 'quantity']} noStyle
+                        rules={[{ required: true, message: '请输入数量' }]}
+                      >
+                        <InputNumber min={0.01} precision={2} placeholder="数量" style={{ width: 100 }} />
+                      </Form.Item>
+                      {linePrice != null ? (
+                        <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' }}>
+                          ¥{linePrice.toFixed(2)}/{lineItem?.unit}
+                          {qty ? <b style={{ color: '#f5222d', marginLeft: 6 }}>小计 ¥{(linePrice * qty).toFixed(2)}</b> : null}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 12, color: '#bbb', whiteSpace: 'nowrap' }}>{addOrderUser ? '未选货品' : '请先选择下单人'}</span>
+                      )}
+                      {fields.length > 1 && (
+                        <Button type="text" danger size="small" onClick={() => remove(name)}>删除</Button>
+                      )}
+                    </Space>
+                  );
+                })}
                 <Button type="dashed" onClick={() => add({ quantity: 1 })} block icon={<PlusOutlined />}>
                   添加货品
                 </Button>
               </>
             )}
           </Form.List>
+          <div style={{ textAlign: 'right', margin: '8px 0 4px', fontSize: 13 }}>
+            预计总金额:<b style={{ color: '#f5222d', fontSize: 16 }}>¥{addTotal.toFixed(2)}</b>
+            {!addOrderUser && <span style={{ color: '#999', marginLeft: 8 }}>(选择下单人后按级别计价)</span>}
+          </div>
+
+          <Form.Item label="配送方式" name="delivery_method">
+            <Radio.Group optionType="button" buttonStyle="solid">
+              <Radio.Button value="door">送货上门</Radio.Button>
+              <Radio.Button value="express">快递寄送</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+          {addDelivery === 'express' && (
+            <Form.Item
+              label="快递单号"
+              name="tracking_number"
+              rules={[{ required: true, whitespace: true, message: '快递寄送需填写快递单号' }]}
+            >
+              <Input placeholder="请填写快递单号" allowClear />
+            </Form.Item>
+          )}
 
           <Form.Item label="备注" name="remark" style={{ marginTop: 12 }}>
             <Input placeholder="备注(可选)" />

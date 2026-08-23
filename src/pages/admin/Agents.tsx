@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Key } from 'react';
 import { Card, Table, Button, Modal, Form, Input, App, Typography, Tag, Row, Col, Statistic } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, UserOutlined, LockOutlined, PhoneOutlined } from '@ant-design/icons';
@@ -24,12 +24,22 @@ export default function AdminAgents() {
   const admin = authService.getCurrentUser();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<{ username: string; password: string; phone?: string }>();
 
   const load = async () => {
     setLoading(true);
-    try { setUsers(await agentService.listAll()); }
+    try {
+      const all = await agentService.listAll();
+      setUsers(all);
+      // 数据加载完成后默认展开管理员根节点及所有一二级代理(三级代理保持收起)
+      setExpandedKeys(
+        all
+          .filter((u) => u.role === 'admin' || (u.role === 'agent' && (u.agent_level === 1 || u.agent_level === 2)))
+          .map((u) => u.id)
+      );
+    }
     catch (e) { message.error((e as Error).message); }
     finally { setLoading(false); }
   };
@@ -105,8 +115,11 @@ export default function AdminAgents() {
           dataSource={tree}
           loading={loading}
           pagination={false}
-          defaultExpandAllRows
-          expandable={{ rowExpandable: (r) => !!r.children?.length }}
+          expandable={{
+            expandedRowKeys: expandedKeys,
+            onExpandedRowsChange: (keys) => setExpandedKeys([...keys]),
+            rowExpandable: (r) => !!r.children?.length,
+          }}
         />
       </Card>
 
@@ -115,7 +128,7 @@ export default function AdminAgents() {
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleCreate}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item label="用户名" name="username" rules={[{ required: true, message: '请输入用户名' }, { min: 3, message: '至少 3 个字符' }]}>

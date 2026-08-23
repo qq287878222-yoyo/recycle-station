@@ -66,6 +66,8 @@ export function priceForUser(
 // ================== 订单 ==================
 export type OrderStatus = 'pending' | 'received' | 'sold';
 export type SplitStatus = 'unsplit' | 'split';
+// 配送方式:door=送货上门 express=快递寄送
+export type DeliveryMethod = 'door' | 'express';
 
 export interface Order {
   id: string;
@@ -86,6 +88,9 @@ export interface Order {
   split_status: SplitStatus;
   split_at: string | null;
   settled_at: string | null;
+  is_manual: boolean;
+  delivery_method: DeliveryMethod | null;
+  tracking_number: string | null;
 }
 
 export interface OrderItem {

@@ -235,7 +235,7 @@ export default function AdminItems() {
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSave}
-        destroyOnClose
+        destroyOnHidden
         width={640}
       >
         <Form form={form} layout="vertical">

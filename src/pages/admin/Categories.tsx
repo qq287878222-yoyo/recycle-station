@@ -92,7 +92,7 @@ export default function AdminCategories() {
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSave}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入分类名' }]}>

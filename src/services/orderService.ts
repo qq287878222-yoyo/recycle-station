@@ -1,6 +1,6 @@
 import { getPostgrest } from '../utils/supabase';
 import { resolveAgentChain } from './authService';
-import type { AppUser, Order, OrderItem, RecycleItem } from '../types/database';
+import type { AppUser, DeliveryMethod, Order, OrderItem, RecycleItem } from '../types/database';
 import { priceForUser } from '../types/database';
 
 export interface OrderLineInput {
@@ -20,9 +20,13 @@ export const orderService = {
     user: AppUser;
     lines: OrderLineInput[];
     remark?: string;
+    deliveryMethod?: DeliveryMethod;
+    trackingNumber?: string;
+    isManual?: boolean;
   }): Promise<Order> {
-    const { user, lines, remark } = params;
+    const { user, lines, remark, deliveryMethod, trackingNumber, isManual } = params;
     if (!lines.length) throw new Error('订单至少包含 1 项货品');
+    if (deliveryMethod === 'express' && !trackingNumber?.trim()) throw new Error('快递寄送需填写快递单号');
 
     const chain = await resolveAgentChain(user);
     const supabase = await getPostgrest();
@@ -57,6 +61,9 @@ export const orderService = {
         total_amount: Number(total.toFixed(2)),
         status: 'pending',
         remark: remark ?? null,
+        is_manual: isManual ?? false,
+        delivery_method: deliveryMethod ?? 'door',
+        tracking_number: deliveryMethod === 'express' ? trackingNumber!.trim() : null,
       })
       .select()
       .single();
@@ -87,6 +94,15 @@ export const orderService = {
       .order('created_at', { ascending: false });
     if (error) throw error;
     return (data ?? []) as OrderWithLines[];
+  },
+
+  /**
+   * 删除订单:order_items 外键带 ON DELETE CASCADE,明细会一并清除
+   */
+  async removeOrder(orderId: string): Promise<void> {
+    const supabase = await getPostgrest();
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) throw error;
   },
 
   /**

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Table, InputNumber, Button, Typography, App, Statistic, Row, Col, Input, Space, Tag, Empty, Select } from 'antd';
+import { Card, Table, InputNumber, Button, Typography, App, Statistic, Row, Col, Input, Space, Tag, Empty, Select, Radio } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { SendOutlined, DeleteOutlined } from '@ant-design/icons';
+import { SendOutlined, DeleteOutlined, HomeOutlined, CarOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { itemService } from '../../services/itemService';
 import { orderService } from '../../services/orderService';
 import { authService } from '../../services/authService';
 import { categoryService } from '../../services/categoryService';
-import { priceForUser, type RecycleItem, type Category } from '../../types/database';
+import { priceForUser, type RecycleItem, type Category, type DeliveryMethod } from '../../types/database';
 
 interface CartLine {
   item: RecycleItem;
@@ -23,6 +23,8 @@ export default function NewOrder() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [remark, setRemark] = useState('');
+  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('door');
+  const [trackingNumber, setTrackingNumber] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -79,16 +81,24 @@ export default function NewOrder() {
       navigate('/login');
       return;
     }
+    if (deliveryMethod === 'express' && !trackingNumber.trim()) {
+      message.warning('快递寄送请填写快递单号');
+      return;
+    }
     setSubmitting(true);
     try {
       const order = await orderService.createOrder({
         user,
         remark,
         lines: lines.map((l) => ({ item: l.item, quantity: l.quantity })),
+        deliveryMethod,
+        trackingNumber: trackingNumber.trim(),
       });
       message.success(`订单提交成功,总金额 ¥${order.total_amount}`);
       setCart({});
       setRemark('');
+      setDeliveryMethod('door');
+      setTrackingNumber('');
       navigate('/my-orders');
     } catch (e) {
       message.error((e as Error).message || '提交失败');
@@ -207,6 +217,27 @@ export default function NewOrder() {
                   rows={2}
                   style={{ marginTop: 12 }}
                 />
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ marginBottom: 6, fontWeight: 500 }}>配送方式</div>
+                  <Radio.Group
+                    value={deliveryMethod}
+                    onChange={(e) => setDeliveryMethod(e.target.value)}
+                    optionType="button"
+                    buttonStyle="solid"
+                  >
+                    <Radio.Button value="door"><HomeOutlined /> 送货上门</Radio.Button>
+                    <Radio.Button value="express"><CarOutlined /> 快递寄送</Radio.Button>
+                  </Radio.Group>
+                  {deliveryMethod === 'express' && (
+                    <Input
+                      placeholder="请填写快递单号"
+                      value={trackingNumber}
+                      onChange={(e) => setTrackingNumber(e.target.value)}
+                      style={{ marginTop: 8 }}
+                      allowClear
+                    />
+                  )}
+                </div>
               </>
             )}
 
