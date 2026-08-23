@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Switch, Upload, App, Typography, Tag, Popconfirm, Select, Row, Col } from 'antd';
-import { PlusOutlined, UploadOutlined, DownloadOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, UploadOutlined, DownloadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import type { UploadProps } from 'antd';
+import type { UploadProps, UploadFile } from 'antd';
 import * as XLSX from 'xlsx';
 import { itemService } from '../../services/itemService';
 import { categoryService } from '../../services/categoryService';
+import { supabase } from '../../utils/supabase';
 import type { RecycleItem, RecycleItemInsert, Category } from '../../types/database';
 
 interface FormValues {
@@ -31,6 +32,8 @@ export default function AdminItems() {
   const [form] = Form.useForm<FormValues>();
   const [keyword, setKeyword] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all');
+  const [imageList, setImageList] = useState<UploadFile[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -74,6 +77,7 @@ export default function AdminItems() {
       active: true, unit: 'kg',
       price_customer: 0, price_l3: 0, price_l2: 0, price_l1: 0,
     });
+    setImageList([]);
     setModalOpen(true);
   };
 
@@ -91,7 +95,47 @@ export default function AdminItems() {
       description: r.description || '',
       active: r.active,
     });
+    setImageList(r.image_url ? [{ uid: '-1', name: 'image', status: 'done', url: r.image_url }] : []);
     setModalOpen(true);
+  };
+
+  /** 图片直传 Supabase Storage 公共桶,成功后把公开链接写入表单 image_url */
+  const imageUploadProps: UploadProps = {
+    listType: 'picture-card',
+    accept: 'image/*',
+    maxCount: 1,
+    fileList: imageList,
+    beforeUpload: (file) => {
+      if (file.size > 5 * 1024 * 1024) {
+        message.warning('图片不能超过 5MB');
+        return Upload.LIST_IGNORE;
+      }
+      return true;
+    },
+    customRequest: async ({ file, onSuccess, onError }) => {
+      setUploading(true);
+      try {
+        const f = file as File;
+        const ext = f.name.includes('.') ? f.name.split('.').pop() : 'png';
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error } = await supabase.storage.from('item-images').upload(path, f, { contentType: f.type });
+        if (error) throw error;
+        const { data } = supabase.storage.from('item-images').getPublicUrl(path);
+        form.setFieldValue('image_url', data.publicUrl);
+        setImageList([{ uid: '-1', name: f.name, status: 'done', url: data.publicUrl }]);
+        onSuccess?.({});
+        message.success('图片上传成功');
+      } catch (e) {
+        onError?.(e as Error);
+        message.error(`图片上传失败: ${(e as Error).message}`);
+      } finally {
+        setUploading(false);
+      }
+    },
+    onRemove: () => {
+      setImageList([]);
+      form.setFieldValue('image_url', '');
+    },
   };
 
   const handleSave = async () => {
@@ -278,7 +322,12 @@ export default function AdminItems() {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="图片 URL" name="image_url"><Input placeholder="https://..." /></Form.Item>
+          <Form.Item name="image_url" hidden><Input /></Form.Item>
+          <Form.Item label="物品图片" extra="支持直接上传图片文件,保存后展示在客户目录中">
+            <Upload {...imageUploadProps}>
+              {imageList.length === 0 && (uploading ? <LoadingOutlined /> : <PlusOutlined />)}
+            </Upload>
+          </Form.Item>
           <Form.Item label="描述" name="description"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
