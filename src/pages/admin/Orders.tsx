@@ -82,6 +82,18 @@ export default function AdminOrders() {
 
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const userName = (id: string | null) => (id ? userMap.get(id)?.username ?? '未知用户' : '—');
+  const itemMap = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
+
+  /** 货品图片列:按 item_id 从货品表取图,货品已删除或无图时兜底 */
+  const itemImageColumn = {
+    title: '图片', key: 'image', width: 64,
+    render: (_: unknown, r: { item_id: string; item_name: string }) => {
+      const url = itemMap.get(r.item_id)?.image_url;
+      return url
+        ? <Image src={url} width={40} height={40} style={{ objectFit: 'cover', borderRadius: 4 }} alt={r.item_name} />
+        : <div style={{ width: 40, height: 40, borderRadius: 4, background: '#f5f5f5', color: '#bbb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>无图</div>;
+    },
+  };
 
   /** 用户联系/收款信息展示(展开详情结算明细中复用) */
   const contactInfo = (u: AppUser | undefined) => {
@@ -448,6 +460,7 @@ export default function AdminOrders() {
                   <Table
                     size="small" pagination={false} rowKey="id" dataSource={record.order_items ?? []}
                     columns={[
+                      itemImageColumn,
                       { title: '货品', dataIndex: 'item_name' },
                       { title: '下单价', dataIndex: 'unit_price', render: (v) => `¥${Number(v).toFixed(2)}` },
                       { title: '数量', render: (_, r) => `${r.quantity} ${r.unit ?? ''}` },
@@ -497,6 +510,7 @@ export default function AdminOrders() {
               dataSource={soldModal.order.order_items ?? []}
               style={{ marginBottom: 16 }}
               columns={[
+                itemImageColumn,
                 { title: '货品', dataIndex: 'item_name' },
                 { title: '数量', width: 90, render: (_, r) => `${r.quantity} ${r.unit ?? ''}` },
                 { title: '一级价', dataIndex: 'price_l1_snapshot', width: 90, render: (v) => `¥${Number(v ?? 0).toFixed(2)}` },
@@ -504,8 +518,8 @@ export default function AdminOrders() {
               ]}
               summary={(rows) => (
                 <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={3}><b>一级代理价合计</b></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3}>
+                  <Table.Summary.Cell index={0} colSpan={4}><b>一级代理价合计</b></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4}>
                     <b style={{ color: '#f5222d' }}>¥{rows.reduce((s, r) => s + Number(r.price_l1_snapshot ?? 0) * Number(r.quantity), 0).toFixed(2)}</b>
                   </Table.Summary.Cell>
                 </Table.Summary.Row>
